@@ -1,0 +1,190 @@
+---
+title: "DHSI 2017 Web Scraping Unconference Demo"
+output:
+  html_notebook: default
+  html_document: default
+---
+# What is Webscraping
+- Data Scraping for extracting web data
+- Can be done manually or via computer interface
+- Capture text, photos, files , links,etc.
+
+# Agenda
+This is a really basic look at webscraping, some of the tools and some of the tools available. We will try to get it work with:
+- The Command Line
+
+- Scraping w/ R:
+
+  - Amazon Reviews
+  
+  - IMDB Information
+  
+  - Wikipedia Tables
+  
+  - (If time) Tweets
+  
+-Look at Beautiful Soup
+
+# GUI Tools for Webscraping
+[webscraper.io](webscraper.io)
+
+- has a chrome plugin
+
+[import.io](import.io)
+
+- 7 day free trial
+
+# Web Scraping with Bash
+```{bash}
+brew install html-xml-utils
+brew install lynx
+```
+
+```{bash}
+echo https://www.reddit.com/r/politics/top/|
+wget -O- -i- |
+hxnormalize -x|
+hxselect -i ".outbound"|
+lynx -stdin -dump > ~/Downloads/reddit.txt
+
+```
+There is a good tutorial on using curl to scrape web pages here: (erik.silversten.se/basic-web-scraping-with-curl)
+
+
+# Scraping with R
+I dabble with web scraping with R.  The first thing that we will do is look at [selector gadget](http://selectorgadget.com/).  This tool will help us understand the web page we are scraping
+```{r}
+library(rvest)
+library(tidyverse)
+library(ggplot2)
+```
+
+## Harvesting Amazon Reviews
+```{r}
+
+review <- read_html("https://www.amazon.com/Amazon-Echo-Bluetooth-Speaker-with-WiFi-Alexa/product-reviews/B00X4WHP5E/ref=cm_cr_dp_see_all_summary?ie=UTF8&reviewerType=avp_only_reviews&showViewpoints=1&sortBy=helpful")%>%
+    html_nodes(".review-format-strip+ .review-data , .a-spacing-top-mini .a-size-base")%>%
+    html_text()
+review
+write.csv(review, "~/Downloads/review.csv")
+```
+
+## Scraping Cast members of IMDB
+
+### Single Page Scrape
+```{r}
+castList <- read_html("http://www.imdb.com/title/tt0112442/?ref_=fn_al_tt_1")%>%
+  html_nodes("#titleCast .itemprop span") %>%
+  html_text
+castList
+write.csv(castList,"~/Downloads/castlist.csv")
+```
+
+
+### Multiple Page Scrape
+
+```{r}
+#Here is function I wrote to 
+castscrape <- function(x){
+  cast <- read_html(x) %>%
+    html_nodes("#titleCast .itemprop")%>%
+    html_text()
+  return(cast)
+}
+```
+
+```{r}
+url <- c("http://www.imdb.com/title/tt0172156/?ref_=tt_rec_tt",
+         "http://www.imdb.com/title/tt1872181/?ref_=fn_al_tt_1",
+         "http://www.imdb.com/title/tt2975590/?ref_=nv_sr_2")
+
+castscrape <- function(x){
+  cast <- read_html(x) %>%
+    html_nodes("#titleCast .itemprop span")%>%
+    html_text()
+}
+castsMembers <- lapply(url, castscrape)
+castsMembers
+```
+
+```{r}
+castList <- read_html("http://www.imdb.com/title/tt0112442/?ref_=fn_al_tt_1")%>%
+  html_nodes("#titleCast .itemprop span") %>%
+  html_text
+castList
+write.csv(castList,"~/Downloads/castlist.csv")
+```
+
+## Scraping  Wikipedia Tables
+```{r}
+# Reading in data from wikipage
+rwSchools <- read_html("https://en.wikipedia.org/wiki/List_of_Rosenwald_schools")
+
+# Extracting the data from at table on the wikipedia page
+tbls <-html_nodes(rwSchools,"table")[[2]]
+
+schoolTable <- html_table(tbls)
+
+sname <-schoolTable[,1:1]
+
+sdates <- schoolTable[,3:3]
+
+slocations <- schoolTable[,4:4]
+
+scitySt <- schoolTable[,5:5]
+
+simages <- rwSchools %>% html_nodes(".image img") %>% html_attr("src")
+  
+rwtbl <- data.frame(sname,sdates,slocations,scitySt)
+head(rwtbl)
+print(rwtbl)
+```
+
+# Creating a product with the Data 
+```{r}
+devtools::install_github("dkahle/ggmap")
+
+devtools::install_github("hadley/ggplot2@v2.2.0")
+library(ggmap) 
+library(ggplot2)
+```
+
+```{r}
+# Geocoding the city information using Google Map API (function)
+lonlat <- geocode(scitySt)
+#Creating a dataframe
+rwtbl <- data.frame(sname,sdates,scitySt,lonlat)
+```
+
+```{r}
+# Editing the text to make the popups more legible
+#Adding a column
+rwtbl$snotes<- paste("SCHOOL NAME:",rwtbl$sname," ; ", "CITY:", rwtbl$scitySt)
+#Splitting a column into two new columns
+srwtbl <-separate(rwtbl,sdates, c("sbuilt", "sregistered"), sep = "\n")
+# Ditto
+srwtbl <- separate(srwtbl,sbuilt,c("dbuilt", "etext"),sep =" " )
+srwtbl <- separate(srwtbl,dbuilt, c("dbuilt", "other", sep="-"))
+# Dropping a column
+srwtbl <- subset(srwtbl, select = -other)
+srwtbl <-subset(srwtbl,select = -etext)
+srwtbl
+
+```
+```{r}
+map <- ggmap(
+	get_googlemap (
+	center = c(-82.394012, 34.852619), 
+	maptype='satellite', #also hybrid/terrain/roadmap
+	scale = 2), #resolution scaling, 1 (low) or 2 (high)
+		size = c(600, 600), #size of the image to grab
+		extent='device', #can also be "normal" etc
+		darken = 0)
+
+
+#theme_set(theme_classic(5))	
+USMap <- qmap("united states", zoom = 4, color = "bw")
+USMap +
+  geom_point(aes(x=lon, y=lat, colour = dbuilt ),
+             data = srwtbl)
+```
